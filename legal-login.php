@@ -17,7 +17,7 @@ $LLR_CFG = [
   // logo
   'logo_url'          => 'https://legalengineering-ca.com/wp-content/uploads/2025/11/LEGAL-LOGO-1-scaled.png',
   'logo_alt'          => 'LEGAL ENGINEERING',
-  'logo_size'         => 85,
+  'logo_size'         => 120,
 ];
 /* ====================================== */
 
@@ -177,8 +177,9 @@ add_shortcode('legal_login', function(){
     html,body{height:100%}
     .llr-wrap{width:100%;max-width:420px;border-radius:26px;background:var(--llr-primary);box-sizing:border-box;box-shadow:0 22px 45px rgba(0,0,0,0.25);border:2px solid var(--llr-accent);overflow:hidden;}
     .llr-card{background:var(--llr-primary);color:#fff;text-align:center;padding:32px 24px 20px;border:0;}
-    .llr-logo{width:<?php echo $lsize; ?>px;height:auto;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .llr-logo{width:<?php echo $lsize; ?>px;height:auto;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;overflow:hidden}
     .llr-logo img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 5px 10px rgba(0,0,0,0.25));}
+    .llr-title{font-size:18px;color:#fff;}
     .llr-body{background:var(--llr-primary);padding:0 24px 28px;color:#f8f5f2;border:0;}
     .llr-label{font-size:12px;font-weight:700;color:var(--llr-accent);margin:12px 0 6px;letter-spacing:0.03em;display:block;text-align:left;}
     .llr-input{width:100%;padding:12px 14px;border:1px solid var(--llr-accent-3);border-radius:12px;background:#fff;color:var(--llr-dark);box-shadow:inset 0 2px 4px rgba(0,0,0,0.05);}
@@ -195,7 +196,7 @@ add_shortcode('legal_login', function(){
             <?php if ($logo): ?>
                 <div class="llr-logo"><img src="<?php echo esc_url($logo); ?>" alt="<?php echo $alt; ?>"></div>
             <?php endif; ?>
-            <h2 style="margin:0 0 6px;font-family:'Montserrat',sans-serif;letter-spacing:0.04em">LEGAL ENGINEERING</h2>
+            <h2 class="llr-title" style="margin:0 0 6px;font-family:'Montserrat',sans-serif;letter-spacing:0.04em">LEGAL ENGINEERING</h2>
             <p style="margin:0;color:var(--llr-accent);font-family:'Poppins',sans-serif">Ingrese sus credenciales para acceder</p>
         </div>
         <div class="llr-body">
