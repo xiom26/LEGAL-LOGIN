@@ -80,6 +80,7 @@ function llr_sync_client_user($username, $password){
 function llr_url_login(){  return home_url( '/'. trim(llr_cfg('login_slug'), '/').'/' ); }
 function llr_url_admin(){  return home_url( llr_cfg('admin_panel_path') ); }
 function llr_url_client(){ return home_url( llr_cfg('client_panel_path') ); }
+function llr_target_for($user){ return llr_is_admin_like($user) ? llr_url_admin() : llr_url_client(); }
 
 function llr_here(){
     $u = $_SERVER['REQUEST_URI'] ?? '/';
@@ -134,6 +135,18 @@ add_action('template_redirect', function(){
         }
     }
 }, 0);
+
+// si ya está logueado y entra al login o wp-login.php, mándalo a su panel
+add_action('template_redirect', function(){
+    if ( ! is_user_logged_in() ) return;
+    $here = llr_here();
+    $login = '/'. trim(llr_cfg('login_slug'), '/') . '/';
+    if ( in_array($here, [$login, '/wp-login.php', '/wp-login.php/'], true) ) {
+        $u = wp_get_current_user();
+        llr_log('template_redirect logged: '.$u->user_login.' -> '.$here);
+        llr_safe_go( llr_target_for($u) );
+    }
+}, 1);
 
 /* ===== Shortcode [legal_login] ===== */
 add_shortcode('legal_login', function(){
@@ -193,7 +206,7 @@ add_shortcode('legal_login', function(){
                 $msg = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
                 llr_log('signon error: '.$user->get_error_message().' | supplied="'.$creds['user_login'].'"');
             } else {
-                $target = llr_is_admin_like($user) ? llr_url_admin() : llr_url_client();
+                $target = llr_target_for($user);
                 llr_log('signon OK user='.$user->user_login.' roles='.implode(',', $user->roles).' -> '.$target);
                 llr_safe_go($target);
             }
@@ -203,7 +216,7 @@ add_shortcode('legal_login', function(){
     // si ya está logueado y viene al login, sácalo (en front)
     if ( is_user_logged_in() ) {
         $u = wp_get_current_user();
-        $t = llr_is_admin_like($u) ? llr_url_admin() : llr_url_client();
+        $t = llr_target_for($u);
         llr_log('already logged: '.$u->user_login.' -> '.$t);
         if ($can_flow){ llr_safe_go($t); }
         return '<p style="padding:12px;background:#eef5ff;border:1px solid #cde;">Ya has iniciado sesión. En el front se redirige a <code>'.esc_html(llr_path($t)).'</code>.</p>';
@@ -279,10 +292,18 @@ add_shortcode('legal_login', function(){
 /* ===== por si usan /wp-login.php: tras login ir a panel por rol ===== */
 add_filter('login_redirect', function($redirect_to, $requested, $user){
     if ( is_wp_error($user) || ! $user ) return $redirect_to;
-    $t = llr_is_admin_like($user) ? llr_url_admin() : llr_url_client();
+    $t = llr_target_for($user);
     llr_log('login_redirect -> '.$t);
     return $t;
-}, 10, 3);
+}, 99, 3);
+
+// forzar redirección por rol apenas se completa el login estándar
+add_action('wp_login', function($user_login, $user){
+    if ( headers_sent() ) return;
+    $t = llr_target_for($user);
+    llr_log('wp_login -> '.$t);
+    llr_safe_go($t);
+}, 10, 2);
 
 /* ===== proteger paneles y bloquear /wp-admin según rol ===== */
 add_action('template_redirect', function(){
