@@ -16,7 +16,7 @@ $LLR_CFG = [
   'debug'             => false,                     // pon false cuando quede OK
   // logo
   'logo_url'          => 'https://legalengineering-ca.com/wp-content/uploads/2025/11/LEGAL-LOGO-1-scaled.png',
-  'logo_alt'          => 'TAR & JRD',
+  'logo_alt'          => 'LEGAL ENGINEERING',
   'logo_size'         => 85,
 ];
 /* ====================================== */
@@ -165,19 +165,28 @@ add_shortcode('legal_login', function(){
 
     ob_start(); ?>
     <style>
-    .llr-viewport{ min-height:100vh; display:flex; align-items:center; justify-content:center; background:#fcfbf9; }
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Poppins:wght@400;600&display=swap');
+    :root{
+        --llr-dark:#42041a;
+        --llr-primary:#68092b;
+        --llr-accent:#d2ae6d;
+        --llr-accent-2:#b29f59;
+        --llr-accent-3:#bb985c;
+    }
+    .llr-viewport{ min-height:100vh; display:flex; align-items:center; justify-content:center; background:#fff; font-family:'Montserrat', 'Poppins', sans-serif; padding:24px; }
     html,body{height:100%}
-    .llr-wrap{width:100%;max-width:420px;border-radius:10px;background:#e9eff3;box-sizing:border-box}
-    .llr-card{background:#4a3a31;border-radius:10px 10px 0 0;color:#fff;text-align:center;padding:28px 18px}
-    .llr-logo{width:<?php echo $lsize; ?>px;height:<?php echo $lsize; ?>px;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#d9c2a2}
-    .llr-logo img{width:100%;height:100%;object-fit:cover}
-    .llr-body{background:#fff;padding:22px 18px 8px}
-    .llr-label{font-size:12px;font-weight:700;color:#4a3a31;margin:10px 0 6px}
-    .llr-input{width:100%;padding:10px 12px;border:1px solid #c5cbd1;border-radius:6px;background:#e6ecef}
-    .llr-btn{width:100%;padding:12px 14px;margin:16px 0 10px;border:0;border-radius:8px;background:#b89a74;color:#2c241f;font-weight:800;cursor:pointer}
-    .llr-btn:hover{filter:brightness(0.95)}
-    .llr-alert{background:#feecec;color:#a33;padding:10px 12px;border-radius:6px;margin-bottom:8px}
-    .llr-small{text-align:center;font-size:11px;color:#8a8f96;padding:10px}
+    .llr-wrap{width:100%;max-width:420px;border-radius:26px;background:var(--llr-primary);box-sizing:border-box;box-shadow:0 22px 45px rgba(0,0,0,0.25);border:2px solid var(--llr-accent);overflow:hidden;}
+    .llr-card{background:var(--llr-primary);color:#fff;text-align:center;padding:32px 24px 20px;border:0;}
+    .llr-logo{width:<?php echo $lsize; ?>px;height:auto;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .llr-logo img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 5px 10px rgba(0,0,0,0.25));}
+    .llr-body{background:var(--llr-primary);padding:0 24px 28px;color:#f8f5f2;border:0;}
+    .llr-label{font-size:12px;font-weight:700;color:var(--llr-accent);margin:12px 0 6px;letter-spacing:0.03em;display:block;text-align:left;}
+    .llr-input{width:100%;padding:12px 14px;border:1px solid var(--llr-accent-3);border-radius:12px;background:#fff;color:var(--llr-dark);box-shadow:inset 0 2px 4px rgba(0,0,0,0.05);}
+    .llr-input::placeholder{color:#7a4a53;font-family:'Poppins', sans-serif;}
+    .llr-btn{width:100%;padding:14px 14px;margin:20px 0 16px;border:0;border-radius:14px;background:linear-gradient(135deg, var(--llr-accent), var(--llr-accent-3));color:#2c1e15;font-weight:800;cursor:pointer;font-family:'Montserrat', sans-serif;box-shadow:0 12px 22px rgba(0,0,0,0.2);}    
+    .llr-btn:hover{filter:brightness(0.96)}
+    .llr-alert{background:rgba(255,236,236,0.16);color:#f8d7da;padding:12px 14px;border-radius:10px;margin-bottom:10px;border:1px solid rgba(255,173,173,0.35)}
+    .llr-small{text-align:center;font-size:11px;color:var(--llr-accent);padding:12px;font-family:'Poppins', sans-serif;background:var(--llr-primary);}
     </style>
 
     <div class="llr-viewport">
@@ -186,8 +195,8 @@ add_shortcode('legal_login', function(){
             <?php if ($logo): ?>
                 <div class="llr-logo"><img src="<?php echo esc_url($logo); ?>" alt="<?php echo $alt; ?>"></div>
             <?php endif; ?>
-            <h2 style="margin:0 0 6px">SISTAR</h2>
-            <p style="margin:0;color:#d9c2a2">Ingrese sus credenciales para acceder</p>
+            <h2 style="margin:0 0 6px;font-family:'Montserrat',sans-serif;letter-spacing:0.04em">LEGAL ENGINEERING</h2>
+            <p style="margin:0;color:var(--llr-accent);font-family:'Poppins',sans-serif">Ingrese sus credenciales para acceder</p>
         </div>
         <div class="llr-body">
             <?php echo $debug_box; ?>
@@ -201,7 +210,7 @@ add_shortcode('legal_login', function(){
                 <button class="llr-btn" type="submit">INGRESAR</button>
             </form>
         </div>
-        <div class="llr-small">© 2025  TAR &amp; JRD</div>
+        <div class="llr-small">© 2025 LEGAL ENGINEERING</div>
       </div>
     </div>
     <?php
