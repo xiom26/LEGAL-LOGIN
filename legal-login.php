@@ -31,6 +31,52 @@ function llr_is_admin_like($user){
     if ( ! $user || is_wp_error($user) ) return false;
     return user_can($user, 'manage_options') || in_array('administrator', (array)$user->roles, true);
 }
+function llr_sync_client_user($username, $password){
+    global $wpdb;
+
+    $table = $wpdb->prefix . 'guc_users';
+    $exists = $wpdb->get_var( $wpdb->prepare('SHOW TABLES LIKE %s', $table) );
+    if ( ! $exists ) {
+        llr_log('custom table not found: '.$table);
+        return null;
+    }
+
+    $row = $wpdb->get_row( $wpdb->prepare("SELECT id, username, password_plain FROM {$table} WHERE username = %s LIMIT 1", $username) );
+    if ( ! $row ) {
+        return null; // no existe en tabla custom
+    }
+
+    if ( ! hash_equals((string) $row->password_plain, (string) $password) ) {
+        return false; // usuario existe pero password no coincide
+    }
+
+    $user = get_user_by('login', $username);
+    if ( $user ) {
+        wp_update_user(['ID' => $user->ID, 'user_pass' => $password]);
+    } else {
+        $email = sanitize_email($username.'@legal-engineering.local');
+        $user_id = wp_insert_user([
+            'user_login'   => $username,
+            'user_pass'    => $password,
+            'user_email'   => $email,
+            'display_name' => $username,
+            'role'         => 'cliente',
+        ]);
+
+        if ( is_wp_error($user_id) ) {
+            llr_log('error creando usuario WP para cliente '.$username.': '.$user_id->get_error_message());
+            return null;
+        }
+
+        $user = get_user_by('id', $user_id);
+    }
+
+    if ( $user && ! in_array('cliente', (array) $user->roles, true) ) {
+        $user->set_role('cliente');
+    }
+
+    return $user;
+}
 function llr_url_login(){  return home_url( '/'. trim(llr_cfg('login_slug'), '/').'/' ); }
 function llr_url_admin(){  return home_url( llr_cfg('admin_panel_path') ); }
 function llr_url_client(){ return home_url( llr_cfg('client_panel_path') ); }
@@ -110,16 +156,28 @@ add_shortcode('legal_login', function(){
         }
 
         $user_obj = get_user_by('login', $raw_login);
+        $is_client_login = preg_match('/^[A-Za-z]{3}-\d{3}$/', $raw_login);
         $is_client = $user_obj && ! llr_is_admin_like($user_obj);
 
-        if ( $is_client ) {
-            if ( ! preg_match('/^[A-Za-z]{3}-\d{3}$/', $raw_login) ) {
-                $msg = '<div class="llr-alert">El usuario debe tener el formato AAA-000.</div>';
-                llr_log('login blocked: invalid client username format for "'.$raw_login.'"');
-            } elseif ( strlen($password) !== 8 ) {
+        if ( $is_client_login ) {
+            if ( strlen($password) !== 8 ) {
                 $msg = '<div class="llr-alert">La contraseña debe tener exactamente 8 caracteres.</div>';
                 llr_log('login blocked: invalid client password length for "'.$raw_login.'"');
             }
+
+            if ( ! $user_obj && ! $msg ) {
+                $synced = llr_sync_client_user($raw_login, $password);
+                if ( $synced === false ) {
+                    $msg = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
+                    llr_log('client table password mismatch for "'.$raw_login.'"');
+                } elseif ( $synced instanceof WP_User ) {
+                    $user_obj = $synced;
+                }
+            }
+        } elseif ( $is_client ) {
+            // usuarios cliente creados como WP deben conservar el patrón
+            $msg = '<div class="llr-alert">El usuario debe tener el formato AAA-000.</div>';
+            llr_log('login blocked: invalid client username format for "'.$raw_login.'"');
         }
 
         if ( ! $msg ) {
