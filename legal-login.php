@@ -16,8 +16,8 @@ $LLR_CFG = [
   'debug'             => false,                     // pon false cuando quede OK
   // logo
   'logo_url'          => 'https://legalengineering-ca.com/wp-content/uploads/2025/11/LEGAL-LOGO-1-scaled.png',
-  'logo_alt'          => 'TAR & JRD',
-  'logo_size'         => 85,
+  'logo_alt'          => 'LEGAL ENGINEERING',
+  'logo_size'         => 120,
 ];
 /* ====================================== */
 
@@ -31,9 +31,56 @@ function llr_is_admin_like($user){
     if ( ! $user || is_wp_error($user) ) return false;
     return user_can($user, 'manage_options') || in_array('administrator', (array)$user->roles, true);
 }
+function llr_sync_client_user($username, $password){
+    global $wpdb;
+
+    $table = $wpdb->prefix . 'guc_users';
+    $exists = $wpdb->get_var( $wpdb->prepare('SHOW TABLES LIKE %s', $table) );
+    if ( ! $exists ) {
+        llr_log('custom table not found: '.$table);
+        return null;
+    }
+
+    $row = $wpdb->get_row( $wpdb->prepare("SELECT id, username, password_plain FROM {$table} WHERE username = %s LIMIT 1", $username) );
+    if ( ! $row ) {
+        return null; // no existe en tabla custom
+    }
+
+    if ( ! hash_equals((string) $row->password_plain, (string) $password) ) {
+        return false; // usuario existe pero password no coincide
+    }
+
+    $user = get_user_by('login', $username);
+    if ( $user ) {
+        wp_update_user(['ID' => $user->ID, 'user_pass' => $password]);
+    } else {
+        $email = sanitize_email($username.'@legal-engineering.local');
+        $user_id = wp_insert_user([
+            'user_login'   => $username,
+            'user_pass'    => $password,
+            'user_email'   => $email,
+            'display_name' => $username,
+            'role'         => 'cliente',
+        ]);
+
+        if ( is_wp_error($user_id) ) {
+            llr_log('error creando usuario WP para cliente '.$username.': '.$user_id->get_error_message());
+            return null;
+        }
+
+        $user = get_user_by('id', $user_id);
+    }
+
+    if ( $user && ! in_array('cliente', (array) $user->roles, true) ) {
+        $user->set_role('cliente');
+    }
+
+    return $user;
+}
 function llr_url_login(){  return home_url( '/'. trim(llr_cfg('login_slug'), '/').'/' ); }
 function llr_url_admin(){  return home_url( llr_cfg('admin_panel_path') ); }
 function llr_url_client(){ return home_url( llr_cfg('client_panel_path') ); }
+function llr_target_for($user){ return llr_is_admin_like($user) ? llr_url_admin() : llr_url_client(); }
 
 function llr_here(){
     $u = $_SERVER['REQUEST_URI'] ?? '/';
@@ -89,6 +136,18 @@ add_action('template_redirect', function(){
     }
 }, 0);
 
+// si ya está logueado y entra al login o wp-login.php, mándalo a su panel
+add_action('template_redirect', function(){
+    if ( ! is_user_logged_in() ) return;
+    $here = llr_here();
+    $login = '/'. trim(llr_cfg('login_slug'), '/') . '/';
+    if ( in_array($here, [$login, '/wp-login.php', '/wp-login.php/'], true) ) {
+        $u = wp_get_current_user();
+        llr_log('template_redirect logged: '.$u->user_login.' -> '.$here);
+        llr_safe_go( llr_target_for($u) );
+    }
+}, 1);
+
 /* ===== Shortcode [legal_login] ===== */
 add_shortcode('legal_login', function(){
     $is_rest  = defined('REST_REQUEST') && REST_REQUEST;
@@ -110,16 +169,28 @@ add_shortcode('legal_login', function(){
         }
 
         $user_obj = get_user_by('login', $raw_login);
+        $is_client_login = preg_match('/^[A-Za-z]{3}-\d{3}$/', $raw_login);
         $is_client = $user_obj && ! llr_is_admin_like($user_obj);
 
-        if ( $is_client ) {
-            if ( ! preg_match('/^[A-Za-z]{3}-\d{3}$/', $raw_login) ) {
-                $msg = '<div class="llr-alert">El usuario debe tener el formato AAA-000.</div>';
-                llr_log('login blocked: invalid client username format for "'.$raw_login.'"');
-            } elseif ( strlen($password) !== 8 ) {
+        if ( $is_client_login ) {
+            if ( strlen($password) !== 8 ) {
                 $msg = '<div class="llr-alert">La contraseña debe tener exactamente 8 caracteres.</div>';
                 llr_log('login blocked: invalid client password length for "'.$raw_login.'"');
             }
+
+            if ( ! $user_obj && ! $msg ) {
+                $synced = llr_sync_client_user($raw_login, $password);
+                if ( $synced === false ) {
+                    $msg = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
+                    llr_log('client table password mismatch for "'.$raw_login.'"');
+                } elseif ( $synced instanceof WP_User ) {
+                    $user_obj = $synced;
+                }
+            }
+        } elseif ( $is_client ) {
+            // usuarios cliente creados como WP deben conservar el patrón
+            $msg = '<div class="llr-alert">El usuario debe tener el formato AAA-000.</div>';
+            llr_log('login blocked: invalid client username format for "'.$raw_login.'"');
         }
 
         if ( ! $msg ) {
@@ -135,7 +206,7 @@ add_shortcode('legal_login', function(){
                 $msg = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
                 llr_log('signon error: '.$user->get_error_message().' | supplied="'.$creds['user_login'].'"');
             } else {
-                $target = llr_is_admin_like($user) ? llr_url_admin() : llr_url_client();
+                $target = llr_target_for($user);
                 llr_log('signon OK user='.$user->user_login.' roles='.implode(',', $user->roles).' -> '.$target);
                 llr_safe_go($target);
             }
@@ -145,7 +216,7 @@ add_shortcode('legal_login', function(){
     // si ya está logueado y viene al login, sácalo (en front)
     if ( is_user_logged_in() ) {
         $u = wp_get_current_user();
-        $t = llr_is_admin_like($u) ? llr_url_admin() : llr_url_client();
+        $t = llr_target_for($u);
         llr_log('already logged: '.$u->user_login.' -> '.$t);
         if ($can_flow){ llr_safe_go($t); }
         return '<p style="padding:12px;background:#eef5ff;border:1px solid #cde;">Ya has iniciado sesión. En el front se redirige a <code>'.esc_html(llr_path($t)).'</code>.</p>';
@@ -165,19 +236,29 @@ add_shortcode('legal_login', function(){
 
     ob_start(); ?>
     <style>
-    .llr-viewport{ min-height:100vh; display:flex; align-items:center; justify-content:center; background:#fcfbf9; }
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Poppins:wght@400;600&display=swap');
+    :root{
+        --llr-dark:#42041a;
+        --llr-primary:#68092b;
+        --llr-accent:#d2ae6d;
+        --llr-accent-2:#b29f59;
+        --llr-accent-3:#bb985c;
+    }
+    .llr-viewport{ min-height:100vh; display:flex; align-items:center; justify-content:center; background:#fff; font-family:'Montserrat', 'Poppins', sans-serif; padding:24px; }
     html,body{height:100%}
-    .llr-wrap{width:100%;max-width:420px;border-radius:10px;background:#e9eff3;box-sizing:border-box}
-    .llr-card{background:#4a3a31;border-radius:10px 10px 0 0;color:#fff;text-align:center;padding:28px 18px}
-    .llr-logo{width:<?php echo $lsize; ?>px;height:<?php echo $lsize; ?>px;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#d9c2a2}
-    .llr-logo img{width:100%;height:100%;object-fit:cover}
-    .llr-body{background:#fff;padding:22px 18px 8px}
-    .llr-label{font-size:12px;font-weight:700;color:#4a3a31;margin:10px 0 6px}
-    .llr-input{width:100%;padding:10px 12px;border:1px solid #c5cbd1;border-radius:6px;background:#e6ecef}
-    .llr-btn{width:100%;padding:12px 14px;margin:16px 0 10px;border:0;border-radius:8px;background:#b89a74;color:#2c241f;font-weight:800;cursor:pointer}
-    .llr-btn:hover{filter:brightness(0.95)}
-    .llr-alert{background:#feecec;color:#a33;padding:10px 12px;border-radius:6px;margin-bottom:8px}
-    .llr-small{text-align:center;font-size:11px;color:#8a8f96;padding:10px}
+    .llr-wrap{width:100%;max-width:420px;border-radius:26px;background:var(--llr-primary);box-sizing:border-box;box-shadow:0 22px 45px rgba(0,0,0,0.25);border:2px solid var(--llr-accent);overflow:hidden;}
+    .llr-card{background:var(--llr-primary);color:#fff;text-align:center;padding:32px 24px 20px;border:0;}
+    .llr-logo{width:<?php echo $lsize; ?>px;height:auto;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .llr-logo img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 5px 10px rgba(0,0,0,0.25));}
+    .llr-title{font-size:18px;color:#fff;}
+    .llr-body{background:var(--llr-primary);padding:0 24px 28px;color:#f8f5f2;border:0;}
+    .llr-label{font-size:12px;font-weight:700;color:var(--llr-accent);margin:12px 0 6px;letter-spacing:0.03em;display:block;text-align:left;}
+    .llr-input{width:100%;padding:12px 14px;border:1px solid var(--llr-accent-3);border-radius:12px;background:#fff;color:var(--llr-dark);box-shadow:inset 0 2px 4px rgba(0,0,0,0.05);}
+    .llr-input::placeholder{color:#7a4a53;font-family:'Poppins', sans-serif;}
+    .llr-btn{width:100%;padding:14px 14px;margin:20px 0 16px;border:0;border-radius:14px;background:linear-gradient(135deg, var(--llr-accent), var(--llr-accent-3));color:#2c1e15;font-weight:800;cursor:pointer;font-family:'Montserrat', sans-serif;box-shadow:0 12px 22px rgba(0,0,0,0.2);}    
+    .llr-btn:hover{filter:brightness(0.96)}
+    .llr-alert{background:rgba(255,236,236,0.16);color:#f8d7da;padding:12px 14px;border-radius:10px;margin-bottom:10px;border:1px solid rgba(255,173,173,0.35)}
+    .llr-small{text-align:center;font-size:11px;color:var(--llr-accent);padding:12px;font-family:'Poppins', sans-serif;background:var(--llr-primary);}
     </style>
 
     <div class="llr-viewport">
@@ -186,8 +267,8 @@ add_shortcode('legal_login', function(){
             <?php if ($logo): ?>
                 <div class="llr-logo"><img src="<?php echo esc_url($logo); ?>" alt="<?php echo $alt; ?>"></div>
             <?php endif; ?>
-            <h2 style="margin:0 0 6px">SISTAR</h2>
-            <p style="margin:0;color:#d9c2a2">Ingrese sus credenciales para acceder</p>
+            <h2 class="llr-title" style="margin:0 0 6px;font-family:'Montserrat',sans-serif;letter-spacing:0.04em">LEGAL ENGINEERING</h2>
+            <p style="margin:0;color:var(--llr-accent);font-family:'Poppins',sans-serif">Ingrese sus credenciales para acceder</p>
         </div>
         <div class="llr-body">
             <?php echo $debug_box; ?>
@@ -201,7 +282,7 @@ add_shortcode('legal_login', function(){
                 <button class="llr-btn" type="submit">INGRESAR</button>
             </form>
         </div>
-        <div class="llr-small">© 2025  TAR &amp; JRD</div>
+        <div class="llr-small">© 2025 LEGAL ENGINEERING</div>
       </div>
     </div>
     <?php
@@ -211,10 +292,18 @@ add_shortcode('legal_login', function(){
 /* ===== por si usan /wp-login.php: tras login ir a panel por rol ===== */
 add_filter('login_redirect', function($redirect_to, $requested, $user){
     if ( is_wp_error($user) || ! $user ) return $redirect_to;
-    $t = llr_is_admin_like($user) ? llr_url_admin() : llr_url_client();
+    $t = llr_target_for($user);
     llr_log('login_redirect -> '.$t);
     return $t;
-}, 10, 3);
+}, 99, 3);
+
+// forzar redirección por rol apenas se completa el login estándar
+add_action('wp_login', function($user_login, $user){
+    if ( headers_sent() ) return;
+    $t = llr_target_for($user);
+    llr_log('wp_login -> '.$t);
+    llr_safe_go($t);
+}, 10, 2);
 
 /* ===== proteger paneles y bloquear /wp-admin según rol ===== */
 add_action('template_redirect', function(){
