@@ -2,22 +2,21 @@
 /**
  * Plugin Name: Login
  * Description: Login con redirección por rol
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Inecxus
  */
 if ( ! defined('ABSPATH') ) exit;
 
 /* ============ CONFIG RÁPIDA ============ */
 $LLR_CFG = [
-  'login_slug'        => 'login-legal',        // página con [legal_login]
-  'admin_panel_path'  => '/panel-administrador/',  // slug real
-  'client_panel_path' => '/panel-cliente/',        // slug real
+  'login_slug'        => 'login-legal',
+  'admin_panel_path'  => '/panel-administrador/',
+  'client_panel_path' => '/panel-cliente/',
   'hide_admin_bar'    => true,
-  'debug'             => false,                     // pon false cuando quede OK
-  // logo
+  'debug'             => false,
   'logo_url'          => 'https://legalengineering-ca.com/wp-content/uploads/2025/11/LEGAL-LOGO-1-scaled.png',
   'logo_alt'          => 'LEGAL ENGINEERING',
-  'logo_size'         => 120,
+  'logo_size'         => 250,
 ];
 /* ====================================== */
 
@@ -139,14 +138,78 @@ add_action('template_redirect', function(){
 // si ya está logueado y entra al login o wp-login.php, mándalo a su panel
 add_action('template_redirect', function(){
     if ( ! is_user_logged_in() ) return;
-    $here = llr_here();
+
+    $here  = llr_here();
     $login = '/'. trim(llr_cfg('login_slug'), '/') . '/';
-    if ( in_array($here, [$login, '/wp-login.php', '/wp-login.php/'], true) ) {
+
+    if ( strpos($here, $login) === 0 || strpos($here, '/wp-login.php') === 0 ) {
         $u = wp_get_current_user();
         llr_log('template_redirect logged: '.$u->user_login.' -> '.$here);
         llr_safe_go( llr_target_for($u) );
     }
 }, 1);
+
+/* ===== Manejo del login (procesado temprano) ===== */
+$LLR_LOGIN_MSG = '';
+
+add_action('init', function() use (&$LLR_LOGIN_MSG){
+    if ( ! isset($_POST['llr_login_nonce']) ) return;
+    if ( ! wp_verify_nonce($_POST['llr_login_nonce'], 'llr_login') ) return;
+    if ( wp_doing_ajax() || (defined('REST_REQUEST') && REST_REQUEST) ) return;
+
+    $raw_login = isset($_POST['llr_user']) ? trim(wp_unslash($_POST['llr_user'])) : '';
+    $password  = isset($_POST['llr_pass']) ? (string) $_POST['llr_pass'] : '';
+
+    if ( is_email($raw_login) ) {
+        $by_email = get_user_by('email', $raw_login);
+        if ( $by_email ) { $raw_login = $by_email->user_login; }
+    }
+
+    $user_obj = get_user_by('login', $raw_login);
+    $is_client_login = preg_match('/^[A-Za-z]{3}-\d{3}$/', $raw_login);
+    $is_client = $user_obj && ! llr_is_admin_like($user_obj);
+
+    if ( $is_client_login ) {
+        if ( strlen($password) !== 8 ) {
+            $LLR_LOGIN_MSG = '<div class="llr-alert">La contraseña debe tener exactamente 8 caracteres.</div>';
+            llr_log('login blocked: invalid client password length for "'.$raw_login.'"');
+        }
+
+        if ( ! $user_obj && ! $LLR_LOGIN_MSG ) {
+            $synced = llr_sync_client_user($raw_login, $password);
+            if ( $synced === false ) {
+                $LLR_LOGIN_MSG = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
+                llr_log('client table password mismatch for "'.$raw_login.'"');
+            } elseif ( $synced instanceof WP_User ) {
+                $user_obj = $synced;
+            }
+        }
+    } elseif ( $is_client ) {
+        $LLR_LOGIN_MSG = '<div class="llr-alert">El usuario debe tener el formato AAA-000.</div>';
+        llr_log('login blocked: invalid client username format for "'.$raw_login.'"');
+    }
+
+    if ( $LLR_LOGIN_MSG ) return;
+
+    $creds = [
+        'user_login'    => $raw_login,
+        'user_password' => $password,
+        'remember'      => false,
+    ];
+
+    $user = wp_signon($creds, is_ssl());
+
+    if ( is_wp_error($user) ) {
+        $LLR_LOGIN_MSG = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
+        llr_log('signon error: '.$user->get_error_message().' | supplied="'.$creds['user_login'].'"');
+        return;
+    }
+
+    $LLR_LOGIN_MSG = '';
+    $target = llr_target_for($user);
+    llr_log('signon OK user='.$user->user_login.' roles='.implode(',', $user->roles).' -> '.$target);
+    llr_safe_go($target);
+});
 
 /* ===== Shortcode [legal_login] ===== */
 add_shortcode('legal_login', function(){
@@ -155,63 +218,8 @@ add_shortcode('legal_login', function(){
     $in_admin = is_admin();
     $can_flow = ! $is_rest && ! $is_ajax && ! $in_admin; // sólo front
 
-    $msg = '';
-
-    // procesar login
-    if ( $can_flow && isset($_POST['llr_login_nonce']) && wp_verify_nonce($_POST['llr_login_nonce'], 'llr_login') ) {
-        $raw_login = isset($_POST['llr_user']) ? trim(wp_unslash($_POST['llr_user'])) : '';
-        $password  = isset($_POST['llr_pass']) ? (string) $_POST['llr_pass'] : '';
-
-        // si usó email, conviértelo a user_login real
-        if ( is_email($raw_login) ) {
-            $by_email = get_user_by('email', $raw_login);
-            if ( $by_email ) { $raw_login = $by_email->user_login; }
-        }
-
-        $user_obj = get_user_by('login', $raw_login);
-        $is_client_login = preg_match('/^[A-Za-z]{3}-\d{3}$/', $raw_login);
-        $is_client = $user_obj && ! llr_is_admin_like($user_obj);
-
-        if ( $is_client_login ) {
-            if ( strlen($password) !== 8 ) {
-                $msg = '<div class="llr-alert">La contraseña debe tener exactamente 8 caracteres.</div>';
-                llr_log('login blocked: invalid client password length for "'.$raw_login.'"');
-            }
-
-            if ( ! $user_obj && ! $msg ) {
-                $synced = llr_sync_client_user($raw_login, $password);
-                if ( $synced === false ) {
-                    $msg = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
-                    llr_log('client table password mismatch for "'.$raw_login.'"');
-                } elseif ( $synced instanceof WP_User ) {
-                    $user_obj = $synced;
-                }
-            }
-        } elseif ( $is_client ) {
-            // usuarios cliente creados como WP deben conservar el patrón
-            $msg = '<div class="llr-alert">El usuario debe tener el formato AAA-000.</div>';
-            llr_log('login blocked: invalid client username format for "'.$raw_login.'"');
-        }
-
-        if ( ! $msg ) {
-            $creds = [
-                'user_login'    => $raw_login,
-                'user_password' => $password,
-                'remember'      => false,
-            ];
-
-            $user = wp_signon($creds, is_ssl()); // <- clave: usa protocolo real
-
-            if ( is_wp_error($user) ) {
-                $msg = '<div class="llr-alert">Usuario o contraseña inválidos.</div>';
-                llr_log('signon error: '.$user->get_error_message().' | supplied="'.$creds['user_login'].'"');
-            } else {
-                $target = llr_target_for($user);
-                llr_log('signon OK user='.$user->user_login.' roles='.implode(',', $user->roles).' -> '.$target);
-                llr_safe_go($target);
-            }
-        }
-    }
+    global $LLR_LOGIN_MSG;
+    $msg = $LLR_LOGIN_MSG;
 
     // si ya está logueado y viene al login, sácalo (en front)
     if ( is_user_logged_in() ) {
@@ -311,18 +319,18 @@ add_action('template_redirect', function(){
     $admin_path = rtrim(llr_cfg('admin_panel_path'), '/') . '/';
     $client_path= rtrim(llr_cfg('client_panel_path'), '/') . '/';
 
-    if ( in_array($here, [$admin_path, $client_path], true) ) {
+    if ( strpos($here, $admin_path) === 0 || strpos($here, $client_path) === 0 ) {
         if ( ! is_user_logged_in() ) {
             llr_log('panel access without login -> login');
             llr_safe_go( llr_url_login() );
         }
 
         $user = wp_get_current_user();
-        if ( $here === $admin_path && ! llr_is_admin_like($user) ) {
+        if ( strpos($here, $admin_path) === 0 && ! llr_is_admin_like($user) ) {
             llr_log('panel admin blocked for non admin -> client panel');
             llr_safe_go( llr_url_client() );
         }
-        if ( $here === $client_path && llr_is_admin_like($user) ) {
+        if ( strpos($here, $client_path) === 0 && llr_is_admin_like($user) ) {
             llr_log('panel client blocked for admin -> admin panel');
             llr_safe_go( llr_url_admin() );
         }
